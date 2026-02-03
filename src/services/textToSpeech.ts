@@ -15,11 +15,15 @@ export class TextToSpeechService {
   private voices: SpeechSynthesisVoice[] = [];
 
   constructor() {
-    this.synthesis = window.speechSynthesis;
-    this.loadVoices();
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      this.synthesis = window.speechSynthesis;
+      this.loadVoices();
+    }
   }
 
   private loadVoices(): void {
+    if (!this.synthesis) return;
+    
     // Load available voices
     this.voices = this.synthesis.getVoices();
     
@@ -150,7 +154,9 @@ export class TextToSpeechService {
    * Cancel any ongoing speech
    */
   cancel(): void {
-    this.synthesis.cancel();
+    if (this.synthesis) {
+      this.synthesis.cancel();
+    }
   }
 }
 
