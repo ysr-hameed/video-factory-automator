@@ -1,7 +1,12 @@
-import { Play, Settings, Zap } from 'lucide-react';
+import { Play, Settings, Zap, Loader2 } from 'lucide-react';
 import { Button } from './ui/button';
 
-export function Header() {
+interface HeaderProps {
+  onGenerate: () => void;
+  isGenerating: boolean;
+}
+
+export function Header({ onGenerate, isGenerating }: HeaderProps) {
   return (
     <header className="glass-panel border-b border-border/50 px-6 py-4">
       <div className="flex items-center justify-between">
@@ -31,9 +36,23 @@ export function Header() {
             <Settings className="w-4 h-4" />
             Config
           </Button>
-          <Button variant="glow" size="sm">
-            <Play className="w-4 h-4" />
-            Generate
+          <Button 
+            variant="glow" 
+            size="sm" 
+            onClick={onGenerate}
+            disabled={isGenerating}
+          >
+            {isGenerating ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                Generating...
+              </>
+            ) : (
+              <>
+                <Play className="w-4 h-4" />
+                Generate
+              </>
+            )}
           </Button>
         </div>
       </div>

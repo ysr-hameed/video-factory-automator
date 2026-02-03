@@ -1,7 +1,12 @@
 import { Play, Maximize2 } from 'lucide-react';
 import { Button } from './ui/button';
 
-export function VideoPreview() {
+interface VideoPreviewProps {
+  currentFrame?: number;
+  currentTime?: string;
+}
+
+export function VideoPreview({ currentFrame = 1, currentTime = '00:00' }: VideoPreviewProps) {
   return (
     <div className="glass-panel p-5">
       <div className="flex items-center justify-between mb-4">
@@ -46,8 +51,8 @@ export function VideoPreview() {
       </div>
 
       <div className="flex items-center justify-between mt-3 text-xs text-muted-foreground">
-        <span>Frame 1 / 450</span>
-        <span className="font-mono">00:00 / 10:00</span>
+        <span>Frame {currentFrame} / 450</span>
+        <span className="font-mono">{currentTime} / 10:00</span>
       </div>
     </div>
   );
