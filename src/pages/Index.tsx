@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { Header } from '@/components/Header';
 import { FormatSpecs } from '@/components/FormatSpecs';
 import { TimelineBar } from '@/components/TimelineBar';
@@ -7,6 +7,7 @@ import { GenerationPipeline } from '@/components/GenerationPipeline';
 import { VideoPreview } from '@/components/VideoPreview';
 import { toast } from '@/hooks/use-toast';
 import type { Section, GenerationStep } from '@/types/video';
+import { VideoGenerationService } from '@/services/videoGeneration';
 
 const initialSections: Section[] = [
   {
@@ -64,6 +65,8 @@ export default function Index() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [currentFrame, setCurrentFrame] = useState(1);
   const [currentTime, setCurrentTime] = useState('00:00');
+  const [generatedVideoUrl, setGeneratedVideoUrl] = useState<string | null>(null);
+  const videoGenerationService = useRef(new VideoGenerationService());
 
   const handleUpdateSection = (id: string, content: string) => {
     setSections((prev) =>
@@ -73,31 +76,6 @@ export default function Index() {
     );
   };
 
-  const simulateStepProgress = useCallback((stepIndex: number): Promise<void> => {
-    return new Promise((resolve) => {
-      let progress = 0;
-      const interval = setInterval(() => {
-        progress += Math.random() * 15 + 5;
-        if (progress >= 100) {
-          progress = 100;
-          clearInterval(interval);
-          setSteps((prev) =>
-            prev.map((step, i) =>
-              i === stepIndex ? { ...step, status: 'complete', progress: 100 } : step
-            )
-          );
-          resolve();
-        } else {
-          setSteps((prev) =>
-            prev.map((step, i) =>
-              i === stepIndex ? { ...step, progress: Math.round(progress) } : step
-            )
-          );
-        }
-      }, 200);
-    });
-  }, []);
-
   const handleGenerate = useCallback(async () => {
     if (isGenerating) return;
 
@@ -106,66 +84,105 @@ export default function Index() {
     setCurrentFrame(1);
     setCurrentTime('00:00');
 
+    // Clean up previous video URL
+    if (generatedVideoUrl) {
+      URL.revokeObjectURL(generatedVideoUrl);
+      setGeneratedVideoUrl(null);
+    }
+
     toast({
       title: "Generation Started",
-      description: "Processing your video script...",
+      description: "Processing your video script with real generation...",
     });
 
     try {
-      for (let i = 0; i < 4; i++) {
-        // Set current step to running
+      const service = videoGenerationService.current;
+      
+      const videoBlob = await service.generateVideo(sections, (progress) => {
+        // Map generation steps to UI steps
+        const stepMapping = {
+          tts: 0,
+          frames: 1,
+          motion: 2,
+          render: 3,
+        };
+
+        const stepIndex = stepMapping[progress.step];
+
+        // Update current step
         setSteps((prev) =>
-          prev.map((step, idx) =>
-            idx === i ? { ...step, status: 'running', progress: 0 } : step
-          )
+          prev.map((step, idx) => {
+            if (idx === stepIndex) {
+              return {
+                ...step,
+                status: 'running' as const,
+                progress: Math.round(progress.progress),
+              };
+            } else if (idx < stepIndex) {
+              return { ...step, status: 'complete' as const, progress: 100 };
+            }
+            return step;
+          })
         );
 
-        // Simulate progress
-        await simulateStepProgress(i);
-
-        // Update frame count and time during generation
-        if (i === 1) {
-          // During frame generation
-          const frameInterval = setInterval(() => {
-            setCurrentFrame((prev) => Math.min(prev + 10, 450));
-          }, 100);
-          await new Promise((r) => setTimeout(r, 500));
-          clearInterval(frameInterval);
-          setCurrentFrame(450);
+        // Update frame count during frame generation
+        if (progress.step === 'frames' && progress.currentFrame) {
+          setCurrentFrame(progress.currentFrame);
         }
 
-        if (i === 3) {
-          // During final render
-          const timeInterval = setInterval(() => {
-            setCurrentTime((prev) => {
-              const [mins, secs] = prev.split(':').map(Number);
-              const totalSecs = mins * 60 + secs + 30;
-              const newMins = Math.floor(totalSecs / 60);
-              const newSecs = totalSecs % 60;
-              if (newMins >= 10) return '10:00';
-              return `${String(newMins).padStart(2, '0')}:${String(newSecs).padStart(2, '0')}`;
-            });
-          }, 100);
-          await new Promise((r) => setTimeout(r, 500));
-          clearInterval(timeInterval);
-          setCurrentTime('10:00');
+        // Update time during render
+        if (progress.step === 'render' && progress.progress > 0) {
+          const totalDuration = sections.reduce((acc, s) => acc + s.duration, 0);
+          const currentSeconds = Math.floor((progress.progress / 100) * totalDuration);
+          const mins = Math.floor(currentSeconds / 60);
+          const secs = currentSeconds % 60;
+          setCurrentTime(`${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`);
         }
-      }
+      });
+
+      // Mark all steps as complete
+      setSteps((prev) =>
+        prev.map((step) => ({ ...step, status: 'complete' as const, progress: 100 }))
+      );
+
+      // Create object URL for the video
+      const videoUrl = URL.createObjectURL(videoBlob);
+      setGeneratedVideoUrl(videoUrl);
+
+      // Set final values
+      const totalDuration = sections.reduce((acc, s) => acc + s.duration, 0);
+      const totalFrames = Math.ceil(totalDuration * 30); // FPS from service config
+      setCurrentFrame(totalFrames);
+      const mins = Math.floor(totalDuration / 60);
+      const secs = totalDuration % 60;
+      setCurrentTime(`${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`);
 
       toast({
         title: "Video Generated!",
-        description: "Your 10-minute video is ready for preview.",
+        description: "Your video is ready for preview and download.",
       });
     } catch (error) {
+      console.error('Generation error:', error);
       toast({
         title: "Generation Failed",
-        description: "An error occurred during video generation.",
+        description: error instanceof Error ? error.message : "An error occurred during video generation.",
         variant: "destructive",
+      });
+      
+      // Mark current step as error
+      setSteps((prev) => {
+        const runningIndex = prev.findIndex(s => s.status === 'running');
+        if (runningIndex >= 0) {
+          return prev.map((step, idx) =>
+            idx === runningIndex ? { ...step, status: 'error' as const } : step
+          );
+        }
+        return prev;
       });
     } finally {
       setIsGenerating(false);
     }
-  }, [isGenerating, simulateStepProgress]);
+  }, [isGenerating, sections, generatedVideoUrl]);
 
   const totalDuration = sections.reduce((acc, s) => acc + s.duration, 0);
   const timelineSections = sections.map((s) => ({ type: s.type, duration: s.duration }));
@@ -196,7 +213,11 @@ export default function Index() {
             </div>
 
             <div className="space-y-6">
-              <VideoPreview currentFrame={currentFrame} currentTime={currentTime} />
+              <VideoPreview 
+                currentFrame={currentFrame} 
+                currentTime={currentTime} 
+                videoUrl={generatedVideoUrl}
+              />
               <GenerationPipeline steps={steps} isGenerating={isGenerating} />
             </div>
           </div>
