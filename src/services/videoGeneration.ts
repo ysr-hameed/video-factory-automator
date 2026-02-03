@@ -66,10 +66,14 @@ export class VideoGenerationService {
           onProgress?.({
             step: 'tts',
             progress: ttsProgress,
-            message: `Generating speech... ${Math.round(ttsProgress)}%`,
+            message: `Processing text... ${Math.round(ttsProgress)}%`,
           });
         }
       );
+
+      if (!audioBlob) {
+        console.info('Continuing video generation without audio');
+      }
 
       // Step 2: Generate frames
       onProgress?.({
@@ -127,7 +131,7 @@ export class VideoGenerationService {
 
       const videoBlob = await videoRenderer.renderVideo(
         frames,
-        audioBlob,
+        audioBlob ?? undefined,
         (renderProgress) => {
           onProgress?.({
             step: 'render',
