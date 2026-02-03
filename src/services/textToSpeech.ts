@@ -142,11 +142,13 @@ export class TextToSpeechService {
 
   /**
    * Estimate duration in seconds for given text
+   * Based on average speaking rate of 150 words per minute
    */
+  private readonly WORDS_PER_MINUTE = 150;
+
   estimateDuration(text: string, rate: number = 1.0): number {
-    const wordsPerMinute = 150; // Average speaking rate
     const words = text.trim().split(/\s+/).length;
-    const baseSeconds = (words / wordsPerMinute) * 60;
+    const baseSeconds = (words / this.WORDS_PER_MINUTE) * 60;
     return baseSeconds / rate;
   }
 

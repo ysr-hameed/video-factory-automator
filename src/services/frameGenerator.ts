@@ -146,10 +146,11 @@ export class FrameGeneratorService {
     const lineHeight = this.options.fontSize! * 0.8;
     const startY = canvas.height / 2;
     
-    // Show progressive text reveal
+    // Show progressive text reveal (2x speed for better visual effect)
+    const textRevealMultiplier = 2;
     const visibleLines = Math.min(
       lines.length,
-      Math.ceil(lines.length * progress * 2)
+      Math.ceil(lines.length * progress * textRevealMultiplier)
     );
     
     lines.slice(0, visibleLines).forEach((line, index) => {

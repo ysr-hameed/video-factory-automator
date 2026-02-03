@@ -151,7 +151,7 @@ export default function Index() {
 
       // Set final values
       const totalDuration = sections.reduce((acc, s) => acc + s.duration, 0);
-      const totalFrames = Math.ceil(totalDuration * 30); // 30 fps
+      const totalFrames = Math.ceil(totalDuration * 30); // FPS from service config
       setCurrentFrame(totalFrames);
       const mins = Math.floor(totalDuration / 60);
       const secs = totalDuration % 60;

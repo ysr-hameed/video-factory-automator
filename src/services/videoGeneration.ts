@@ -150,19 +150,19 @@ export class VideoGenerationService {
 
   /**
    * Estimate total generation time in seconds
+   * Note: These are rough approximations that vary by device performance
    */
+  private readonly ESTIMATE_TTS_SECONDS_PER_MINUTE = 5;
+  private readonly ESTIMATE_FRAME_SECONDS_PER_FRAME = 0.01;
+  private readonly ESTIMATE_RENDER_SECONDS_PER_FRAME = 0.02;
+
   estimateGenerationTime(sections: Section[]): number {
     const totalDuration = sections.reduce((acc, s) => acc + s.duration, 0);
     const frames = Math.ceil(totalDuration * this.options.fps);
     
-    // Rough estimates:
-    // TTS: ~5 seconds per minute of speech
-    // Frames: ~0.01 seconds per frame
-    // Render: ~0.02 seconds per frame
-    
-    const ttsTime = (totalDuration / 60) * 5;
-    const frameTime = frames * 0.01;
-    const renderTime = frames * 0.02;
+    const ttsTime = (totalDuration / 60) * this.ESTIMATE_TTS_SECONDS_PER_MINUTE;
+    const frameTime = frames * this.ESTIMATE_FRAME_SECONDS_PER_FRAME;
+    const renderTime = frames * this.ESTIMATE_RENDER_SECONDS_PER_FRAME;
     
     return Math.ceil(ttsTime + frameTime + renderTime);
   }

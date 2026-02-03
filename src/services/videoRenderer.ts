@@ -16,7 +16,7 @@ export class VideoRendererService {
 
   constructor(options: VideoRenderOptions) {
     this.options = {
-      videoBitsPerSecond: 2500000, // 2.5 Mbps
+      videoBitsPerSecond: 2500000, // 2.5 Mbps (Megabits per second, ~312.5 KB/s)
       mimeType: 'video/webm;codecs=vp9',
       ...options,
     };
