@@ -4,7 +4,13 @@
  */
 
 import type { Section } from '@/types/video';
-import { paintFrame, type FramePaintOptions } from './framePainter';
+import {
+  createSectionPaintCache,
+  paintFrame,
+  paintFrameWithCache,
+  type FramePaintOptions,
+  type SectionPaintCache,
+} from './framePainter';
 
 export interface FrameOptions {
   width: number;
@@ -84,6 +90,15 @@ export class FrameGeneratorService {
       fontSize: this.options.fontSize!,
     };
 
+    // Cache expensive layout and gradients per section (critical for performance)
+    const cacheById = new Map<string, SectionPaintCache>();
+    for (const section of sections) {
+      cacheById.set(
+        section.id,
+        createSectionPaintCache({ ctx, canvas: targetCanvas, section, options: paintOptions })
+      );
+    }
+
     for (const section of sections) {
       const sectionFrames = Math.ceil(section.duration * this.options.fps);
 
@@ -97,14 +112,20 @@ export class FrameGeneratorService {
         const progress = i / sectionFrames;
         const timestamp = currentTime + i / this.options.fps;
 
-        paintFrame({
-          ctx,
-          canvas: targetCanvas,
-          section,
-          progress,
-          timestamp,
-          options: paintOptions,
-        });
+        const cache = cacheById.get(section.id);
+        if (cache) {
+          paintFrameWithCache({
+            ctx,
+            canvas: targetCanvas,
+            cache,
+            progress,
+            timestamp,
+            options: paintOptions,
+          });
+        } else {
+          // Fallback (should not happen)
+          paintFrame({ ctx, canvas: targetCanvas, section, progress, timestamp, options: paintOptions });
+        }
 
         frameCount++;
 
@@ -112,7 +133,12 @@ export class FrameGeneratorService {
           onProgress?.((frameCount / totalFrames) * 100, frameCount, totalFrames);
         }
 
-        // Maintain approximate real-time frame pacing for MediaRecorder
+        // Yield to keep the UI responsive (scroll/click) even during long renders
+        // and keep approximate real-time pacing for MediaRecorder.
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+        if (frameCount % 5 === 0) {
+          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        }
         await new Promise((resolve) => setTimeout(resolve, frameDurationMs));
       }
 
