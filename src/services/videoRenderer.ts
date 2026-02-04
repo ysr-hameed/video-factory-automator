@@ -1,9 +1,10 @@
 /**
  * Video Renderer Service
- * Renders frames into a video using MediaRecorder API
+ * Renders a canvas stream into a video using MediaRecorder API
  */
 
-import type { Frame } from './frameGenerator';
+import type { Section } from '@/types/video';
+import type { FrameGeneratorService } from './frameGenerator';
 
 export interface VideoRenderOptions {
   fps: number;
@@ -105,6 +106,107 @@ export class VideoRendererService {
   }
 
   /**
+   * Render a complete video directly from sections without allocating per-frame canvases.
+   * This avoids OOM crashes for long scripts.
+   */
+  async renderVideoFromSections(
+    sections: Section[],
+    frameGenerator: FrameGeneratorService,
+    audioBlob?: Blob,
+    onProgress?: (progress: number) => void,
+    onFrame?: (currentFrame: number, totalFrames: number) => void,
+    signal?: AbortSignal
+  ): Promise<Blob> {
+    const { width, height, fps } = frameGenerator.getConfig();
+
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+
+    const stream = canvas.captureStream(fps);
+
+    // Add audio track if provided
+    if (audioBlob) {
+      try {
+        const audioContext = new AudioContext();
+        const arrayBuffer = await audioBlob.arrayBuffer();
+        const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+
+        const destination = audioContext.createMediaStreamDestination();
+        const bufferSource = audioContext.createBufferSource();
+        bufferSource.buffer = audioBuffer;
+        bufferSource.connect(destination);
+        // Start the buffer immediately; recording/rendering runs in (approx) real time.
+        bufferSource.start(0);
+
+        destination.stream.getAudioTracks().forEach((track) => {
+          stream.addTrack(track);
+        });
+      } catch (error) {
+        console.warn('Could not add audio to video:', error);
+      }
+    }
+
+    const mediaRecorder = new MediaRecorder(stream, {
+      mimeType: this.options.mimeType,
+      videoBitsPerSecond: this.options.videoBitsPerSecond,
+    });
+
+    const chunks: Blob[] = [];
+
+    return await new Promise((resolve, reject) => {
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data && event.data.size > 0) {
+          chunks.push(event.data);
+        }
+      };
+
+      mediaRecorder.onstop = () => {
+        const videoBlob = new Blob(chunks, { type: this.options.mimeType });
+        resolve(videoBlob);
+      };
+
+      mediaRecorder.onerror = (event) => {
+        reject(new Error(`MediaRecorder error: ${event}`));
+      };
+
+      // Start recording
+      try {
+        mediaRecorder.start();
+      } catch (e) {
+        reject(e);
+        return;
+      }
+
+      frameGenerator
+        .renderToCanvas(
+          sections,
+          canvas,
+          (progress, currentFrame, totalFrames) => {
+            // Throttle UI updates: only update at most ~10 times per second.
+            // (renderToCanvas itself calls this sparsely)
+            onProgress?.(progress);
+            if (currentFrame && totalFrames) onFrame?.(currentFrame, totalFrames);
+          },
+          signal
+        )
+        .then(() => {
+          mediaRecorder.stop();
+          stream.getTracks().forEach((track) => track.stop());
+        })
+        .catch((err) => {
+          try {
+            mediaRecorder.stop();
+          } catch {
+            // ignore
+          }
+          stream.getTracks().forEach((track) => track.stop());
+          reject(err);
+        });
+    });
+  }
+
+  /**
    * Draw frames to canvas sequentially at the correct FPS
    */
   private async drawFramesSequentially(
@@ -150,3 +252,10 @@ export class VideoRendererService {
     return types.filter(type => MediaRecorder.isTypeSupported(type));
   }
 }
+
+// Backward-compat type import (kept local so existing code compiles with minimal edits)
+type Frame = {
+  canvas: HTMLCanvasElement;
+  timestamp: number;
+  sectionId: string;
+};

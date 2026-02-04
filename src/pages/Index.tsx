@@ -125,8 +125,8 @@ export default function Index() {
           })
         );
 
-        // Update frame count during frame generation
-        if (progress.step === 'frames' && progress.currentFrame) {
+        // Update frame count whenever provided (render step streams frames now)
+        if (progress.currentFrame) {
           setCurrentFrame(progress.currentFrame);
         }
 
