@@ -27,6 +27,7 @@ export interface GenerationProgress {
 export class VideoGenerationService {
   private ttsService: TextToSpeechService;
   private options: Required<VideoGenerationOptions>;
+  private abortController: AbortController | null = null;
 
   constructor(options: VideoGenerationOptions = {}) {
     this.options = {
@@ -48,6 +49,10 @@ export class VideoGenerationService {
     onProgress?: (progress: GenerationProgress) => void
   ): Promise<Blob> {
     try {
+      // Cancel any in-flight run
+      this.abortController?.abort();
+      this.abortController = new AbortController();
+
       // Step 1: Generate speech for all sections
       onProgress?.({
         step: 'tts',
@@ -75,11 +80,11 @@ export class VideoGenerationService {
         console.info('Continuing video generation without audio');
       }
 
-      // Step 2: Generate frames
+      // Step 2: Prepare frame generation (rendering happens in the render step to avoid OOM)
       onProgress?.({
         step: 'frames',
         progress: 0,
-        message: 'Generating video frames...',
+        message: 'Preparing frame timeline...',
       });
 
       const frameGenerator = new FrameGeneratorService({
@@ -88,18 +93,15 @@ export class VideoGenerationService {
         fps: this.options.fps,
       });
 
-      const frames = await frameGenerator.generateFrames(
-        sections,
-        (frameProgress, currentFrame, totalFrames) => {
-          onProgress?.({
-            step: 'frames',
-            progress: frameProgress,
-            currentFrame,
-            totalFrames,
-            message: `Generating frames... ${currentFrame}/${totalFrames}`,
-          });
-        }
-      );
+      const totalDuration = sections.reduce((acc, s) => acc + s.duration, 0);
+      const totalFrames = Math.ceil(totalDuration * this.options.fps);
+      onProgress?.({
+        step: 'frames',
+        progress: 100,
+        currentFrame: 0,
+        totalFrames,
+        message: `Prepared ${totalFrames} frames`,
+      });
 
       // Step 3: Apply motion (simulate for now)
       onProgress?.({
@@ -129,8 +131,9 @@ export class VideoGenerationService {
         fps: this.options.fps,
       });
 
-      const videoBlob = await videoRenderer.renderVideo(
-        frames,
+      const videoBlob = await videoRenderer.renderVideoFromSections(
+        sections,
+        frameGenerator,
         audioBlob ?? undefined,
         (renderProgress) => {
           onProgress?.({
@@ -138,13 +141,25 @@ export class VideoGenerationService {
             progress: renderProgress,
             message: `Rendering video... ${Math.round(renderProgress)}%`,
           });
-        }
+        },
+        (currentFrame, totalFramesFromRenderer) => {
+          onProgress?.({
+            step: 'render',
+            progress: (currentFrame / Math.max(1, totalFramesFromRenderer)) * 100,
+            currentFrame,
+            totalFrames: totalFramesFromRenderer,
+            message: `Rendering frames... ${currentFrame}/${totalFramesFromRenderer}`,
+          });
+        },
+        this.abortController.signal
       );
 
       return videoBlob;
     } catch (error) {
       console.error('Video generation error:', error);
       throw error;
+    } finally {
+      this.abortController = null;
     }
   }
 
@@ -172,5 +187,6 @@ export class VideoGenerationService {
    */
   cancel(): void {
     this.ttsService.cancel();
+    this.abortController?.abort();
   }
 }
