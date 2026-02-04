@@ -11,6 +11,16 @@ export interface FramePaintOptions {
   fontSize: number;
 }
 
+export interface SectionPaintCache {
+  sectionId: string;
+  sectionType: Section['type'];
+  title: string;
+  contentLines: string[];
+  gradient: CanvasGradient;
+  badgeLabel: string;
+  badgeColor: string;
+}
+
 const SECTION_COLORS: Record<string, string> = {
   hook: '#dc2626',
   overview: '#2563eb',
@@ -29,12 +39,19 @@ export function paintFrame(args: {
 }): void {
   const { ctx, canvas, section, progress, timestamp, options } = args;
 
-  // Clear and draw background
-  ctx.globalAlpha = 1;
-  ctx.fillStyle = options.backgroundColor;
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  const cache = createSectionPaintCache({ ctx, canvas, section, options });
+  paintFrameWithCache({ ctx, canvas, cache, progress, timestamp, options });
+}
 
-  // Gradient overlay by section type
+export function createSectionPaintCache(args: {
+  ctx: CanvasRenderingContext2D;
+  canvas: HTMLCanvasElement;
+  section: Section;
+  options: FramePaintOptions;
+}): SectionPaintCache {
+  const { ctx, canvas, section, options } = args;
+
+  // Precompute gradient for this section
   const gradient = ctx.createRadialGradient(
     canvas.width / 2,
     canvas.height / 2,
@@ -47,7 +64,49 @@ export function paintFrame(args: {
   const color = SECTION_COLORS[section.type] || '#6366f1';
   gradient.addColorStop(0, `${color}20`);
   gradient.addColorStop(1, 'transparent');
-  ctx.fillStyle = gradient;
+
+  // Precompute wrapped content lines (this is VERY expensive if done per-frame)
+  ctx.font = `${options.fontSize * 0.6}px Arial, sans-serif`;
+  const maxWidth = canvas.width * 0.8;
+  const contentLines = wrapText(ctx, section.content, maxWidth);
+
+  const badges: Record<string, { label: string; color: string }> = {
+    hook: { label: 'HOOK', color: '#dc2626' },
+    overview: { label: 'OVERVIEW', color: '#2563eb' },
+    core: { label: 'CORE', color: '#16a34a' },
+    myth: { label: 'MYTH', color: '#9333ea' },
+    summary: { label: 'SUMMARY', color: '#ea580c' },
+  };
+  const badge = badges[section.type] || { label: 'SECTION', color: '#6366f1' };
+
+  return {
+    sectionId: section.id,
+    sectionType: section.type,
+    title: section.title,
+    contentLines,
+    gradient,
+    badgeLabel: badge.label,
+    badgeColor: badge.color,
+  };
+}
+
+export function paintFrameWithCache(args: {
+  ctx: CanvasRenderingContext2D;
+  canvas: HTMLCanvasElement;
+  cache: SectionPaintCache;
+  progress: number;
+  timestamp: number;
+  options: FramePaintOptions;
+}): void {
+  const { ctx, canvas, cache, progress, timestamp, options } = args;
+
+  // Clear and draw background
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = options.backgroundColor;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // Gradient overlay by section type
+  ctx.fillStyle = cache.gradient;
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
   // Title
@@ -55,15 +114,14 @@ export function paintFrame(args: {
   ctx.font = `bold ${options.fontSize}px Arial, sans-serif`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText(section.title, canvas.width / 2, canvas.height / 3);
+  ctx.fillText(cache.title, canvas.width / 2, canvas.height / 3);
 
   // Content with fade
   const opacity = calculateTextOpacity(progress);
   ctx.globalAlpha = opacity;
   ctx.font = `${options.fontSize * 0.6}px Arial, sans-serif`;
 
-  const maxWidth = canvas.width * 0.8;
-  const lines = wrapText(ctx, section.content, maxWidth);
+  const lines = cache.contentLines;
   const lineHeight = options.fontSize * 0.8;
   const startY = canvas.height / 2;
 
@@ -80,7 +138,7 @@ export function paintFrame(args: {
 
   ctx.globalAlpha = 1;
 
-  drawSectionBadge(ctx, section.type, 40, 40);
+  drawSectionBadge(ctx, cache.badgeLabel, cache.badgeColor, 40, 40);
 
   // Timestamp
   ctx.font = '20px monospace';
@@ -116,25 +174,21 @@ function wrapText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number)
   return lines;
 }
 
-function drawSectionBadge(ctx: CanvasRenderingContext2D, type: string, x: number, y: number): void {
-  const badges: Record<string, { label: string; color: string }> = {
-    hook: { label: 'HOOK', color: '#dc2626' },
-    overview: { label: 'OVERVIEW', color: '#2563eb' },
-    core: { label: 'CORE', color: '#16a34a' },
-    myth: { label: 'MYTH', color: '#9333ea' },
-    summary: { label: 'SUMMARY', color: '#ea580c' },
-  };
-
-  const badge = badges[type] || { label: 'SECTION', color: '#6366f1' };
-
-  ctx.fillStyle = badge.color;
+function drawSectionBadge(
+  ctx: CanvasRenderingContext2D,
+  label: string,
+  color: string,
+  x: number,
+  y: number
+): void {
+  ctx.fillStyle = color;
   ctx.fillRect(x, y, 120, 30);
 
   ctx.fillStyle = '#ffffff';
   ctx.font = 'bold 14px Arial, sans-serif';
   ctx.textAlign = 'left';
   ctx.textBaseline = 'middle';
-  ctx.fillText(badge.label, x + 10, y + 15);
+  ctx.fillText(label, x + 10, y + 15);
 }
 
 function formatTime(seconds: number): string {

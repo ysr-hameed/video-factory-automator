@@ -170,9 +170,9 @@ export class VideoRendererService {
         reject(new Error(`MediaRecorder error: ${event}`));
       };
 
-      // Start recording
+      // Start recording (timeslice reduces internal buffering / memory spikes)
       try {
-        mediaRecorder.start();
+        mediaRecorder.start(1000);
       } catch (e) {
         reject(e);
         return;
